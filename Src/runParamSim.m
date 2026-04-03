@@ -95,17 +95,32 @@ function [simInit, ENVMT, controllerGains_traction, ...
     pathparam.retractionTarget = ...
         transformFromWtoO(ENVMT.windDirection_rad, ...
         pathparam.retractionTarget_W);
+
+    if any(~isfinite(simInit.pos_W_init))
+        error('runParamSim:InvalidInitialPosition', ...
+            'Initial position contains invalid values.');
+    end
     
 %     simInit.pos_W_init(2)=0;
 
     simInit.pos_O_init = transformFromWtoO(ENVMT.windDirection_rad, simInit.pos_W_init)';
+    normPos = norm(simInit.pos_W_init);
+    if normPos <= eps
+        error('runParamSim:InvalidInitialPosition', ...
+            'Initial position norm is too small for stable attitude initialisation.');
+    end
 
     sideslip = simInit.sideSlipAngle_rad; % initial sideslip
     simInit.iniEul = [0/180*pi,0/180*pi,90/180*pi+sideslip];
 
-    elevation=asin(simInit.pos_W_init(3)/norm(simInit.pos_W_init));
+    elevRatio = simInit.pos_W_init(3)/normPos;
+    elevRatio = max(min(elevRatio, 1), -1);
+    elevation=asin(elevRatio);
     simInit.iniEul(1) = -(pi/2 - elevation);
-    vWindHeight = ENVMT.base_windspeed*interp1(ENVMT.wind_height,ENVMT.wind_data,simInit.pos_W_init(3));
+    windHeightQuery = simInit.pos_W_init(3);
+    windHeightQuery = max(min(windHeightQuery, max(ENVMT.wind_height)), min(ENVMT.wind_height));
+    vWindHeight = ENVMT.base_windspeed * interp1(ENVMT.wind_height, ENVMT.wind_data, ...
+        windHeightQuery, 'linear', 'extrap');
     simInit.iniVel = simInit.vel_B_init_noWind';
     velAircraftI = simInit.iniVel(1);
     simInit.iniEul(2) = -atan(vWindHeight/velAircraftI); % initial pitch
@@ -113,6 +128,11 @@ function [simInit, ENVMT, controllerGains_traction, ...
 
     iniVelWind = velAircraftI*[0,-sin(sideslip),sin(simInit.iniEul(2))];
     simInit.iniVel = simInit.iniVel + iniVelWind;
+
+    if any(~isfinite(simInit.iniVel)) || any(~isfinite(simInit.iniEul))
+        error('runParamSim:InvalidInitialCondition', ...
+            'Initial velocity or Euler angles contain invalid values.');
+    end
 
     psi_init = ENVMT.windDirection_rad+pi;
     if psi_init > pi
@@ -150,9 +170,14 @@ function [simInit, ENVMT, controllerGains_traction, ...
     tetherParams.tether_inital_lenght = norm(simInit.pos_O_init);
     tetherParams.l0 = tetherParams.tether_inital_lenght/(tetherParams.numParticles+1);
     tetherParams.pos_p_init = [];
-    e_t = simInit.pos_W_init/norm(simInit.pos_W_init);
+    e_t = simInit.pos_W_init/normPos;
     for p = 1 : tetherParams.numParticles
         tetherParams.pos_p_init = [tetherParams.pos_p_init, p*e_t*tetherParams.l0];
     end
     tetherParams.pos_p_init = fliplr(tetherParams.pos_p_init);
+
+    if any(~isfinite(tetherParams.pos_p_init), 'all')
+        error('runParamSim:InvalidTetherInitialisation', ...
+            'Initial tether particle positions contain invalid values.');
+    end
 end

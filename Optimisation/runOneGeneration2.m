@@ -39,6 +39,7 @@ function yOUT = runOneGeneration2(xIN)
     global runID
     global listvars paramUbounds model Int_listvars
     global fileName_simInput fileName_kite
+    global useParallel
     
     if numel(runID) == 0
         runID = 0;
@@ -48,6 +49,7 @@ function yOUT = runOneGeneration2(xIN)
     nRetvals = 9; % number of outputs of the cost function CHECK!!
     
     optsIN = xIN;
+    penaltyVector = [1e8; 1e8; 1e8; 1e8; 1e8; 0; 0; 0; 5e8];
     
     try
         load('list_old_individuals.mat','list_old_individuals', 'listvars_copy', ...
@@ -66,34 +68,29 @@ function yOUT = runOneGeneration2(xIN)
     
     fprintf(1, 'Adding %d jobs\n', nInd);
     lastResume = 0;
-    foundMatch = [];
+    foundMatch = false(1, nInd);
+    curResults = repmat(struct('retval', []), 1, nInd);
+    yOUTlog = repmat(penaltyVector, 1, nInd);
     
     
     for i = 1:nInd
         curResults(i).retval = [];
-        stopSearching = 0;
-        foundMatch(i) = 0;
         % try to figure out if that individual did already run
         for jj = 1:szList_old_individuals
             j = lastResume + jj;
             if j > szList_old_individuals
                 j = j - szList_old_individuals;
             end
-            if sum(optsIN(:, i) ~= list_old_individuals(1:(end-nRetvals), j)) == 0 && stopSearching == 0
+            if sum(optsIN(:, i) ~= list_old_individuals(1:(end-nRetvals), j)) == 0
                 if ~isinf(list_old_individuals(end, j))
                     % if it was analyzed
                     results(i).retval = list_old_individuals((end-nRetvals+1):end, j);
                     curResults(i) = results(i);
-                    foundMatch(i) = 1;
-                    stopSearching = 1;
+                    foundMatch(i) = true;
+                    yOUTlog(:, i) = curResults(i).retval;
                     lastResume = j;
-                    break;
-                else
-                    % it was never analyzed
-                    foundMatch(i) = 0;
-                    stopSearching = 1;
-                    break;
                 end
+                break;
             end
         end
     end
@@ -109,32 +106,100 @@ function yOUT = runOneGeneration2(xIN)
     
     %% define sim input for optimization
     MegAWESkite = yaml.ReadYaml(fileName_kite_copy,false,true);
+    simIn = Simulink.SimulationInput.empty(0, nInd);
+    simInitByIdx = cell(1, nInd);
+    tetherForceMaxByIdx = NaN(1, nInd);
+    validToRun = false(1, nInd);
+    simOutByIdx = cell(1, nInd);
+    successfulMask = false(1, nInd);
     
     for i = 1:size(optsIN,2)
-        [simInit, ENVMT, controllerGains_traction, ... 
+        if foundMatch(i)
+            continue
+        end
+
+        try
+            [simInit, ENVMT, controllerGains_traction, ... 
+                controllerGains_retraction, tetherParams, pathparam, ...
+                actuatorLimit, winchParameter] = ...
+                runParamSim(fileName_simInput_copy, MegAWESkite, listvars_copy, ...
+                optsIN(:,i), paramUbounds_copy, Int_listvars_copy);
+
+            simInit.doPlot = false;
+
+            % to be optimized wind speed
+            simInP = initAllStructs(model_copy, simInit, ENVMT, controllerGains_traction, ... 
             controllerGains_retraction, tetherParams, pathparam, ...
-            actuatorLimit, winchParameter] = ...
-            runParamSim(fileName_simInput_copy, MegAWESkite, listvars_copy, ...
-            optsIN(:,i), paramUbounds_copy, Int_listvars_copy);
-        
-        simInit.doPlot = false;
-    
-        % to be optimized wind speed
-        simInP = initAllStructs(model_copy, simInit, ENVMT, controllerGains_traction, ... 
-        controllerGains_retraction, tetherParams, pathparam, ...
-        actuatorLimit, winchParameter, MegAWESkite);
-        simIn(i) = simInP;
+            actuatorLimit, winchParameter, MegAWESkite);
+            simIn(i) = simInP;
+            simInitByIdx{i} = simInit;
+            tetherForceMaxByIdx(i) = tetherParams.forceMax;
+            validToRun(i) = true;
+        catch ME
+            warning('runOneGeneration2:PrepareIndividualFailed', ...
+                'Skipping individual %d due to invalid setup (%s). Applying penalty.', i, ME.message);
+        end
     end
     
     %% run simulations
     if sum(foundMatch) ~= nInd
-        simOut = parsim(simIn);
-        yOUTlog  = getCost_new(optsIN, simOut, simInit, tetherParams.forceMax, ...
-          MegAWESkite.MainWing.alphaMax);   %CHECK!! -> cost fun file
-    
+        validIdx = find(validToRun);
+        if ~isempty(validIdx)
+            if useParallel
+                try
+                    simOutValid = parsim(simIn(validIdx), ...
+                        'StopOnError', 'off', ...
+                        'UseFastRestart', false, ...
+                        'ShowProgress', 'off');
+
+                    for k = 1:numel(validIdx)
+                        i = validIdx(k);
+                        simErrMsg = '';
+                        try
+                            simErrMsg = simOutValid(k).ErrorMessage;
+                        catch
+                            %
+                        end
+
+                        if isempty(simErrMsg)
+                            successfulMask(i) = true;
+                            simOutByIdx{i} = simOutValid(k);
+                        else
+                            warning('runOneGeneration2:SimulationFailed', ...
+                                'Simulation failed for individual %d (%s). Applying penalty.', i, simErrMsg);
+                        end
+                    end
+                catch ME
+                    warning('runOneGeneration2:ParsimFailed', ...
+                        'Parallel simulation batch failed (%s). Retrying this generation in serial mode.', ME.message);
+                    useParallel = false;
+                end
+            end
+
+            if ~useParallel
+                for k = 1:numel(validIdx)
+                    i = validIdx(k);
+                    try
+                        simOutByIdx{i} = sim(simIn(i), 'UseFastRestart', false);
+                        successfulMask(i) = true;
+                    catch ME
+                        warning('runOneGeneration2:SimulationFailed', ...
+                            'Simulation failed for individual %d (%s). Applying penalty.', i, ME.message);
+                    end
+                end
+            end
+
+            successfulIdx = find(successfulMask);
+            for k = 1:numel(successfulIdx)
+                i = successfulIdx(k);
+                ySingle = getCost_new(optsIN(:, i), simOutByIdx{i}, ...
+                    simInitByIdx{i}, tetherForceMaxByIdx(i), MegAWESkite.MainWing.alphaMax);
+                yOUTlog(:, i) = ySingle(:, 1);
+            end
+        end
+
         list_old_individuals(:, szList_old_individuals+(1:nInd)) = [optsIN; yOUTlog];
     else
-        yOUTlog = list_old_individuals(end-nRetvals+1:end,runID+(1:nInd));
         list_old_individuals(:,(end-nInd+1):end) = []; % delete NaN
     end
     
@@ -144,10 +209,12 @@ function yOUT = runOneGeneration2(xIN)
     
     save('list_old_individuals.mat', 'list_old_individuals', 'listvars_copy', ...
         'paramUbounds_copy', 'Int_listvars_copy');
-    try
-        parfevalOnAll(gcp,@bdclose,0,'all');
-    catch
-        %
+    if useParallel
+        try
+            parfevalOnAll(gcp,@bdclose,0,'all');
+        catch
+            %
+        end
     end
     runID = runID + nInd;
     fprintf(1, ' done\n');

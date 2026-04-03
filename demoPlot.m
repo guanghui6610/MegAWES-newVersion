@@ -46,13 +46,17 @@ addpath(genpath('Src'))
 
 %% 3D simulation plot results - Trajectory coloured by Mechanical Power
 
+P_mech_signal = getSimOutSignal(simOut, 'P_mech');
+cycle_signal_counter = getSimOutSignal(simOut, 'cycle_signal_counter');
+kiteposW_signal = getSimOutSignal(simOut, 'kiteposW');
+
 % Extract mechanical power from last pumping cycle before converegence
-P_mech = extractSignalOfLastCycle2(simOut.P_mech, ...
-                simOut.cycle_signal_counter, simInit );
+P_mech = extractSignalOfLastCycle2(P_mech_signal, ...
+                cycle_signal_counter, simInit );
 
 % Extract 3D kite position from last pumping cycle before converegence
-KitePosW = extractSignalOfLastCycle3D(simOut.kiteposW, ...
-                simOut.cycle_signal_counter, simInit );
+KitePosW = extractSignalOfLastCycle3D(kiteposW_signal, ...
+                cycle_signal_counter, simInit );
 
 
 %Define color of trajectory based on power produced

@@ -21,6 +21,10 @@ function [targetP_start, targetP_retract] = determine_startPos_retractTarget(pat
     phi_el = pathparam.elevAng;
     theta  = pathparam.polarAng;
     R = tetherParams.minLength*tetherParams.maxLength;
+    if ~isfinite(R) || R <= 0
+        error('determine_startPos_retractTarget:InvalidRadius', ...
+            'Computed path radius is invalid. Check minLength and maxLength settings.');
+    end
     s = linspace(0,2*pi,100);
     
     xc =  R * cos(phi_el)*cos(theta);      
@@ -65,9 +69,11 @@ function [targetP_start, targetP_retract] = determine_startPos_retractTarget(pat
         z = pc(3) + x_s * e1(3) + y_s * e2(3);
     end
     
-    xP = real(R * x./ sqrt(x.^2 + y.^2 + z.^2));
-    yP = real(R * y./ sqrt(x.^2 + y.^2 + z.^2));  %Projection path on the sphere
-    zP = real(R * z./ sqrt(x.^2 + y.^2 + z.^2));
+    denom = sqrt(x.^2 + y.^2 + z.^2);
+    denom(denom <= eps) = NaN;
+    xP = real(R * x./ denom);
+    yP = real(R * y./ denom);  %Projection path on the sphere
+    zP = real(R * z./ denom);
     
     %For simplicity the side of retraction is fixed at positive y axis in wind
     %reference frame, hence the following is possible
@@ -75,16 +81,15 @@ function [targetP_start, targetP_retract] = determine_startPos_retractTarget(pat
     if pathparam.isCircle
         [~, i_outer] = min(yP);
         [~, i_upper] = max(zP);
-        xretract = sqrt(R^2-(yP(i_outer))^2-zP(i_upper)^2);
-        if ~isreal(xretract)
-            xretract = 0;
-        end
+        retractArgument = R^2-(yP(i_outer))^2-zP(i_upper)^2;
+        xretract = sqrt(max(retractArgument, 0));
         targetP_retract = [xretract; yP(i_outer); zP(i_upper)];
         targetP_start = [xP(i_upper); yP(i_upper); zP(i_upper)];
     elseif pathparam.direction>0
         [~, i_outer] = min(yP);
         [~, i_upper] = max(zP);
-        xretract = sqrt(R^2-yP(i_outer)^2-zP(i_upper)^2);
+        retractArgument = R^2-yP(i_outer)^2-zP(i_upper)^2;
+        xretract = sqrt(max(retractArgument, 0));
         targetP_retract = [xretract; yP(i_outer); zP(i_upper)];
         targetP_start = [xP(i_upper); yP(i_upper); zP(i_upper)];
     else
@@ -92,6 +97,11 @@ function [targetP_start, targetP_retract] = determine_startPos_retractTarget(pat
         [~, i_upper] = max(zP);
         targetP_retract = [xP(i_outer); yP(i_outer)+100; zP(i_outer)];
         targetP_start = [xP(i_upper); yP(i_upper); zP(i_upper)];
+    end
+
+    if any(~isfinite(targetP_start)) || any(~isfinite(targetP_retract))
+        error('determine_startPos_retractTarget:InvalidTargets', ...
+            'Generated start or retraction target contains invalid values.');
     end
 end
 

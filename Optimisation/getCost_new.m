@@ -47,7 +47,15 @@ function costOut = getCost_new(optsIN, simOut, simInit, tetherForceMax, alphamax
     cost = zeros(1,size(optsIN,2));
     no_cycles = zeros(1,size(optsIN,2));
     for i = 1:size(optsIN,2)
-        if (isempty(simOut(i).power_conv_flag)) %initialization 
+        curSimOut = simOut(i);
+        powerConvFlag = [];
+        try
+            powerConvFlag = curSimOut.power_conv_flag;
+        catch
+            %
+        end
+
+        if (isempty(powerConvFlag)) %initialization 
             pTether(i) = 1e8;
             pAoA(i) = 1e8;
             pCte(i) = 1e8;
@@ -58,8 +66,9 @@ function costOut = getCost_new(optsIN, simOut, simInit, tetherForceMax, alphamax
             Convergence(i) = 0;
             no_cycles(i) = 0;
         else
-            if (double(simOut(i).power_conv_flag))==0
-                time_factor = simOut(i).P_mech.Time(end)/simInit.simulationTime;
+            if (double(powerConvFlag))==0
+                P_mech_signal = getSimOutSignal(curSimOut, 'P_mech');
+                time_factor = P_mech_signal.Time(end)/simInit.simulationTime;
                 pen = 1e6/time_factor;
                 pTether(i) = pen;
                 pAoA(i) = pen;
@@ -69,8 +78,8 @@ function costOut = getCost_new(optsIN, simOut, simInit, tetherForceMax, alphamax
                 pPAPR(i) = pen;
                 mPower(i) = 0; % make it different for each run but still artificial number
                 try
-                    if simOut(i).No_of_Cycles >= 1
-                        mPower(i) = simOut(i).No_of_Cycles^3 * 1e2;
+                    if curSimOut.No_of_Cycles >= 1
+                        mPower(i) = curSimOut.No_of_Cycles^3 * 1e2;
                     else
                         mPower(i) = 0;
                     end
@@ -78,27 +87,35 @@ function costOut = getCost_new(optsIN, simOut, simInit, tetherForceMax, alphamax
                     %
                 end
                 Convergence(i) = 0;
-                no_cycles(i) = simOut(i).No_of_Cycles;
+                no_cycles(i) = curSimOut.No_of_Cycles;
             else
+                cycle_signal_counter = getSimOutSignal(curSimOut, 'cycle_signal_counter');
+                P_mech_signal = getSimOutSignal(curSimOut, 'P_mech');
+                tether_force_signal = getSimOutSignal(curSimOut, 'TetherForce');
+                aoa_signal = getSimOutSignal(curSimOut, 'AoA');
+                cte_signal = getSimOutSignal(curSimOut, 'Crosstrackerr');
+                vel_signal = getSimOutSignal(curSimOut, 'Vel');
+                fstate_signal = getSimOutSignal(curSimOut, 'Fstate');
+
                 %% Extracting the signal segments of the last cycle.
                 % Mechanical power
-                P_mech_last_cycle = extractSignalOfLastCycle2(simOut(i).P_mech, ...
-                    simOut(i).cycle_signal_counter, simInit );
+                P_mech_last_cycle = extractSignalOfLastCycle2(P_mech_signal, ...
+                    cycle_signal_counter, simInit );
                 
-                TetherForce_last_cycle = extractSignalOfLastCycle2( simOut(i).TetherForce,...
-                    simOut(i).cycle_signal_counter, simInit );
+                TetherForce_last_cycle = extractSignalOfLastCycle2( tether_force_signal,...
+                    cycle_signal_counter, simInit );
                 
-                Aoa_last_cycle = extractSignalOfLastCycle2( simOut(i).AoA,...
-                    simOut(i).cycle_signal_counter, simInit );
+                Aoa_last_cycle = extractSignalOfLastCycle2( aoa_signal,...
+                    cycle_signal_counter, simInit );
                 
-                Cte_last_cycle = extractSignalOfLastCycle2( simOut(i).Crosstrackerr,...
-                    simOut(i).cycle_signal_counter, simInit );
+                Cte_last_cycle = extractSignalOfLastCycle2( cte_signal,...
+                    cycle_signal_counter, simInit );
                 
-                Vel_last_cycle = extractSignalOfLastCycle2( simOut(i).Vel,...
-                    simOut(i).cycle_signal_counter, simInit );
+                Vel_last_cycle = extractSignalOfLastCycle2( vel_signal,...
+                    cycle_signal_counter, simInit );
                 
-                Fstate_last_cycle = extractSignalOfLastCycle2(simOut(i).Fstate, ...
-                    simOut(i).cycle_signal_counter, simInit );
+                Fstate_last_cycle = extractSignalOfLastCycle2(fstate_signal, ...
+                    cycle_signal_counter, simInit ); %#ok<NASGU>
                 
                 
                 % Penalties
@@ -132,7 +149,7 @@ function costOut = getCost_new(optsIN, simOut, simInit, tetherForceMax, alphamax
                 %% Final power scaling   
                 mPower(i) = mean(P_mech_last_cycle.Data); %*100
                 Convergence(i) = 1;
-                no_cycles(i) = simOut(i).No_of_Cycles;
+                no_cycles(i) = curSimOut.No_of_Cycles;
             end
         end
         cost(i) = - mPower(i) + pTether(i) + pCte(i) + pAoA(i) + pVel(i) + pPAPR(i); 

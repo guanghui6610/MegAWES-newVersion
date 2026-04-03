@@ -12,24 +12,29 @@
 %% Set folder dependencies
 
 directoriesToAdd = {'Lib','Src','Optimisation'};
-initialiseWorkspaceAndFolders(directoriesToAdd,{'numProcs'})
+initialiseWorkspaceAndFolders(directoriesToAdd,{'numProcs','useParallel'})
 %%
 global runID
 global listvars paramUbounds model Int_listvars
 global fileName_simInput fileName_kite
+global useParallel
 runID = 0;
 
 if ~exist('numProcs','var')
     numProcs=4;
 end
 
-c = parcluster('local');
-c.NumWorkers = numProcs;
-if ~exist('tmpStorage',"dir")
-    mkdir('tmpStorage')
+if ~exist('useParallel','var')
+    useParallel = true;
 end
-c.JobStorageLocation = 'tmpStorage';
-parpool(c, c.NumWorkers);
+
+if useParallel
+    jobStoragePath = fullfile(pwd, 'tmpStorage');
+    [useParallel, poolStatus] = startParallelPoolWithRecovery(numProcs, jobStoragePath);
+    disp(poolStatus);
+else
+    disp('Parallel pool disabled. Running optimisation simulations in serial mode.');
+end
 
 if exist('list_old_individuals.mat','file')
     movefile('list_old_individuals.mat',sprintf('%s_list_old_individuals.mat',datetime('today')))
@@ -69,3 +74,51 @@ opts.TolHistFun = 1e-20;
 XMIN = cmaes('runOneGeneration2', paramsFull, paramSigma, opts);
 % delete(gcp());
 exit
+
+function [useParallel, statusMessage] = startParallelPoolWithRecovery(numProcs, jobStoragePath)
+useParallel = true;
+statusMessage = 'Parallel pool already available.';
+
+pool = gcp('nocreate');
+if ~isempty(pool)
+    return
+end
+
+if exist(jobStoragePath, 'dir') ~= 7
+    mkdir(jobStoragePath);
+end
+
+if ~probeProcessPool(numProcs)
+    useParallel = false;
+    statusMessage = ['Process-based parallel pool is unavailable in this MATLAB environment. ', ...
+        'Falling back to serial mode to avoid hard crashes.'];
+    return
+end
+
+try
+    parpool('Processes', numProcs);
+    statusMessage = 'Parallel pool started successfully.';
+catch ME
+    warning('runOptimisation:ParallelInitFailed', ...
+        'Parallel initialisation failed (%s). Falling back to serial mode.', ME.message);
+    useParallel = false;
+    statusMessage = 'Parallel initialisation failed. Running optimisation simulations in serial mode.';
+end
+
+end
+
+function isAvailable = probeProcessPool(numProcs)
+isAvailable = false;
+
+probeWorkers = min(max(1, numProcs), 2);
+probeCmd = [ ...
+    'matlab -batch "try; p = gcp(''''nocreate''''); ', ...
+    'if isempty(p); parpool(''''Processes'''',' num2str(probeWorkers) '); end; ', ...
+    'delete(gcp(''''nocreate'''')); catch; exit(1); end; exit(0);"'];
+
+[status, ~] = system(probeCmd);
+if status == 0
+    isAvailable = true;
+end
+
+end
