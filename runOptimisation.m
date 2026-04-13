@@ -44,8 +44,8 @@ delete('variablescmaes.mat')
 
 %% Importing input parameters
 model = 'simL0_multiPath';
-fileName_simInput = 'circle_simInput.yaml';
-fileName_optBounds = 'circle_opt_params_limits.yaml';
+fileName_simInput = 'fig8up_simInput.yaml';
+fileName_optBounds = 'fig8up_opt_params_limits.yaml';
 fileName_kite = 'MegAWESkite.yaml';
 
 [listvars, x_init, paramUbounds, paramLbounds, Int_listvars] = ...
@@ -73,7 +73,6 @@ opts.TolHistFun = 1e-20;
 
 XMIN = cmaes('runOneGeneration2', paramsFull, paramSigma, opts);
 % delete(gcp());
-exit
 
 function [useParallel, statusMessage] = startParallelPoolWithRecovery(numProcs, jobStoragePath)
 useParallel = true;

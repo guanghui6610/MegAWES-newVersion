@@ -67,8 +67,7 @@ function costOut = getCost_new(optsIN, simOut, simInit, tetherForceMax, alphamax
             no_cycles(i) = 0;
         else
             if (double(powerConvFlag))==0
-                P_mech_signal = getSimOutSignal(curSimOut, 'P_mech');
-                time_factor = P_mech_signal.Time(end)/simInit.simulationTime;
+                time_factor = curSimOut.P_mech.Time(end)/simInit.simulationTime;
                 pen = 1e6/time_factor;
                 pTether(i) = pen;
                 pAoA(i) = pen;
@@ -89,33 +88,25 @@ function costOut = getCost_new(optsIN, simOut, simInit, tetherForceMax, alphamax
                 Convergence(i) = 0;
                 no_cycles(i) = curSimOut.No_of_Cycles;
             else
-                cycle_signal_counter = getSimOutSignal(curSimOut, 'cycle_signal_counter');
-                P_mech_signal = getSimOutSignal(curSimOut, 'P_mech');
-                tether_force_signal = getSimOutSignal(curSimOut, 'TetherForce');
-                aoa_signal = getSimOutSignal(curSimOut, 'AoA');
-                cte_signal = getSimOutSignal(curSimOut, 'Crosstrackerr');
-                vel_signal = getSimOutSignal(curSimOut, 'Vel');
-                fstate_signal = getSimOutSignal(curSimOut, 'Fstate');
-
                 %% Extracting the signal segments of the last cycle.
                 % Mechanical power
-                P_mech_last_cycle = extractSignalOfLastCycle2(P_mech_signal, ...
-                    cycle_signal_counter, simInit );
+                P_mech_last_cycle = extractSignalOfLastCycle2(curSimOut.P_mech, ...
+                    curSimOut.cycle_signal_counter, simInit );
                 
-                TetherForce_last_cycle = extractSignalOfLastCycle2( tether_force_signal,...
-                    cycle_signal_counter, simInit );
+                TetherForce_last_cycle = extractSignalOfLastCycle2( curSimOut.TetherForce,...
+                    curSimOut.cycle_signal_counter, simInit );
                 
-                Aoa_last_cycle = extractSignalOfLastCycle2( aoa_signal,...
-                    cycle_signal_counter, simInit );
+                Aoa_last_cycle = extractSignalOfLastCycle2( curSimOut.AoA,...
+                    curSimOut.cycle_signal_counter, simInit );
                 
-                Cte_last_cycle = extractSignalOfLastCycle2( cte_signal,...
-                    cycle_signal_counter, simInit );
+                Cte_last_cycle = extractSignalOfLastCycle2( curSimOut.Crosstrackerr,...
+                    curSimOut.cycle_signal_counter, simInit );
                 
-                Vel_last_cycle = extractSignalOfLastCycle2( vel_signal,...
-                    cycle_signal_counter, simInit );
+                Vel_last_cycle = extractSignalOfLastCycle2( curSimOut.Vel,...
+                    curSimOut.cycle_signal_counter, simInit );
                 
-                Fstate_last_cycle = extractSignalOfLastCycle2(fstate_signal, ...
-                    cycle_signal_counter, simInit ); %#ok<NASGU>
+                Fstate_last_cycle = extractSignalOfLastCycle2(curSimOut.Fstate, ...
+                    curSimOut.cycle_signal_counter, simInit ); %#ok<NASGU>
                 
                 
                 % Penalties
